@@ -3,6 +3,7 @@ import streamlit as st
 import array
 import io
 from PIL import Image
+from scipy.ndimage import median_filter
 
 # '''
 # Each function (add, sub, add 2 img, histogram equalization) take the image in numpy arrray format
@@ -71,17 +72,14 @@ def convert_to_gray(image):
     return img_gray
 
 def normalize_image(image):
-    norm_img = np.array((image - image.min()) / (image.max() - image.min()))
+    norm_img = np.clip(image, 0, 255)
     return norm_img
 
 
-def add_sub_val_img(image, value, add):
+def add_sub_val_img(image, value):
     img_gray = convert_to_gray(image)
-    if add is True:
-        new_img = img_gray + value
-    else: 
-        new_img = img_gray - value
-    new_img_normalize = normalize_image(new_img)
+    new_img = img_gray.astype(np.int16) + value
+    new_img_normalize = normalize_image(new_img).astype(np.uint8)
     return new_img_normalize
 
 def hist_equalization(image):
@@ -98,11 +96,44 @@ def add_sub_2_img(image1, image2, add):
     img_gray1 = convert_to_gray(image1)
     img_gray2 = convert_to_gray(image2)
     if add is True:
-        new_img = img_gray1 + img_gray2
+        new_img = img_gray1.astype(np.int16) + img_gray2.astype(np.int16)
     else:
-        new_img = img_gray1 - img_gray2
-    new_img_norm = normalize_image(new_img)
+        new_img = img_gray1.astype(np.int16) - img_gray2.astype(np.int16)
+    new_img_norm = normalize_image(new_img).astype(np.uint8)
     return new_img_norm
+
+def sharp_and_blur(image, mode):
+    h, w = image.shape
+    sharpen_filter = np.array([[-1, -1, -1], [-1, 9, -1], [-1, -1, -1]])
+    average_filter = np.array([[1/25, 1/25, 1/25, 1/25, 1/25],
+                               [1/25, 1/25, 1/25, 1/25, 1/25],
+                               [1/25, 1/25, 1/25, 1/25, 1/25],
+                               [1/25, 1/25, 1/25, 1/25, 1/25],
+                               [1/25, 1/25, 1/25, 1/25, 1/25]])
+    if mode == 'Sharpening':
+        mod_img = np.convolve(image.reshape(-1), sharpen_filter.reshape(-1), mode = 'same').astype(np.int16)
+    elif mode == 'Blurring':
+        mod_img = np.convolve(image.reshape(-1), average_filter.reshape(-1), mode = 'same').astype(np.int16)
+    new_img = normalize_image(mod_img.reshape(h, w)).astype(np.uint8)
+    return new_img
+
+def edge_detect(img):
+    h, w =img.shape
+    sobel_x = np.array([[-1, -2, -1], [0, 0, 0], [1, 2, 1]])
+    sobel_y = np.array([[1, 0, -1], [2, 0, -2], [1, 0, -1]])
+    conv_x = np.convolve(img.reshape(-1), sobel_x.reshape(-1), mode = 'same').astype(np.float32)
+    conv_y = np.convolve(img.reshape(-1), sobel_y.reshape(-1), mode = 'same').astype(np.float32)
+    magnitude = (np.power(conv_x, 2) + np.power(conv_y,2)).astype(np.float32)
+    magnitude = np.sqrt(magnitude)
+    new_img = magnitude.reshape(h, w)
+    new_img = (new_img - new_img.min())/(new_img.max() - new_img.min())
+    # new_img = normalize_image(new_img).astype(np.uint8)
+    return new_img
+
+def med_filter(img):
+    new_img = median_filter(img,size=5)
+    new_img = normalize_image(new_img)
+    return new_img
 
 def main_page():
     st.title("Image Edit GUI")
@@ -111,11 +142,13 @@ def main_page():
     st.write('Course: Image Processing Class')
     st.write('Professor: Jae-Won Suh')
     options = ["Show Image", 
-               "Adding Value to Image", 
-               "Substracting Value from Image", 
+               "Adding or Subtracting Value to Image", 
                "Histogram Equalization", 
                "Adding 2 Images", 
-               "Substracting 2 Images"]
+               "Substracting 2 Images",
+               "Sharpening or Blurring",
+               "Detect Edges",
+               "Apply Median Filtering"]
     selected_option = st.selectbox("Select an option", options)
     st.write('You Selected: ', selected_option)
     return selected_option
@@ -126,12 +159,12 @@ def show_img_page():
         image = convert_type(file_upload)
         st.image(image, caption ='This is the image you selected')
 
-def add_sub_val_img_page(is_add):
+def add_sub_val_img_page():
     col1, col2 = st.columns(2)
     with col1:
         file_upload = st.file_uploader("Upload your image here...")
     with col2: 
-        value = st.number_input("Enter a number between 0-255", value=0, step=1)
+        value = st.slider("Adjust the value", -255, 255, 0)
 
     ncol1, ncol2 = st.columns(2)
     with ncol1:
@@ -141,7 +174,7 @@ def add_sub_val_img_page(is_add):
     with ncol2:
         if file_upload is not None:
             img_gray = convert_to_gray(image)
-            new_img = add_sub_val_img(image=img_gray, value=value, add = is_add)
+            new_img = add_sub_val_img(image=img_gray, value=value)
             st.image(new_img, caption = 'This is the modified image')
             
 def hist_eq_page():
@@ -179,21 +212,69 @@ def add_sub_2img_page(is_add):
             new_img = add_sub_2_img(image1=image1, image2= image2, add= is_add)
             st.image(new_img, caption= "This is the new image")
 
+def sharp_blurr_page():
+    col1, col2 = st.columns(2)
+    with col1:
+        file_upload = st.file_uploader("Upload your image here...")
+    with col2: 
+        mode = st.radio("Choose your option", ("Sharpening", "Blurring"))
+
+    ncol1, ncol2 = st.columns(2)
+    with ncol1:
+        if file_upload is not None:
+            image  = convert_type(file_upload)
+            st.image(image, caption= "This is the original image")
+    with ncol2:
+        if file_upload is not None:
+            img_gray = convert_to_gray(image)
+            new_img = sharp_and_blur(image=img_gray, mode=mode) 
+            st.image(new_img, caption = 'This is the modified image')
+
+def edge_detect_page():
+    file_upload = st.file_uploader("Upload your image here...")
+    col1, col2 = st.columns(2)
+    with col1:
+        if file_upload is not None:
+            image = convert_type(file_upload)
+            st.image(image, caption= "This is the original image")
+    with col2:
+        if file_upload is not None:
+            img_gray = convert_to_gray(image)
+            new_img = edge_detect(img_gray)
+            st.image(new_img, caption = 'This is the Edge Detected from the Image')
+
+def med_filter_page():
+    file_upload = st.file_uploader("Upload your image here...")
+    col1, col2 = st.columns(2)
+    with col1:
+        if file_upload is not None:
+            image = convert_type(file_upload)
+            st.image(image, caption= "This is the original image")
+    with col2:
+        if file_upload is not None:
+            img_gray = convert_to_gray(image)
+            new_img = med_filter(img_gray)
+            st.image(new_img, caption = 'This is the Image after Applying Median Filter')
 
 def main(): 
     option = main_page()
     if option == "Show Image":
         show_img_page()
-    elif option == "Adding Value to Image":
-        add_sub_val_img_page(is_add= True)
-    elif option == "Substracting Value from Image":
-        add_sub_val_img_page(is_add=False)
+    elif option == "Adding or Subtracting Value to Image":
+        add_sub_val_img_page()
     elif option == "Histogram Equalization":
         hist_eq_page()
     elif option == "Adding 2 Images":
         add_sub_2img_page(is_add= True)
-    else:
+    elif option == "Substracting 2 Images":
         add_sub_2img_page(is_add=False)
-    
+    elif option =="Sharpening or Blurring":
+        sharp_blurr_page()
+    elif option =="Detect Edges":
+        edge_detect_page()
+    elif option == "Apply Median Filtering":
+        med_filter_page()
 
-main()
+    
+if __name__ == "__main__":
+    main()
