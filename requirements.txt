@@ -1,4 +1,4 @@
-numpy==1.21.2
-streamlit==0.89.0
-Pillow==8.3.2
-scipy==1.7.1
+numpy
+streamlit
+Pillow
+scipy
