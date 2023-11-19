@@ -4,7 +4,8 @@ import array
 import io
 from PIL import Image
 from scipy.ndimage import median_filter
-
+from scipy.ndimage import generic_filter
+import cv2
 # '''
 # Each function (add, sub, add 2 img, histogram equalization) take the image in numpy arrray format
 # and output the image also in numpy array format 
@@ -28,7 +29,7 @@ def convert_type(img):
         img_bytes = img.read()
         image_bytes = io.BytesIO(img_bytes)
         new_img = Image.open(image_bytes)
-    return np.array(new_img)
+        return np.array(new_img)
 
 def resize_image(image, new_size):
     height, width = image.shape[:2]
@@ -135,6 +136,90 @@ def med_filter(img):
     new_img = normalize_image(new_img)
     return new_img
 
+def erosion_dilation(img, erosion, method, neighbor_size):
+    kernel =  np.array([[0, 1, 0],
+                  [1, 1, 1],
+                  [0, 1, 0]], dtype=np.uint8)
+    def minimum_filter(window):
+        return np.min(window)
+    def maximum_filter(window):
+        return np.max(window)
+    if erosion:
+        if method == "min_filter":
+            filtered_image = generic_filter(img, minimum_filter, size=neighbor_size)
+        if method == "structuring element":
+            filtered_image = cv2.erode(img, kernel, iterations=1)
+    else:
+        if method == "max_filter":
+            filtered_image = generic_filter(img, maximum_filter, size=neighbor_size)
+        if method == "structuring element":
+            filtered_image = cv2.dilate(img, kernel=kernel, iterations=1)
+    return normalize_image(filtered_image)
+
+
+def count_objects(img):
+    if len(img.shape) > 2:
+        img = convert_to_gray(img)
+        
+    _, thres_img = cv2.threshold(img, 127, 255, cv2.THRESH_BINARY)
+    
+    thres_img[thres_img < 255] = 0
+    thres_img[thres_img >=255] =1
+    
+    labeled_image, num_labels = label_objects(thres_img)
+
+    object_count = num_labels - 1
+
+    return object_count, labeled_image
+
+def label_objects(binary_image):
+    labeled_image = np.zeros_like(binary_image, dtype=np.uint32)
+    current_label = 1
+
+    for i in range(binary_image.shape[0]):
+        for j in range(binary_image.shape[1]):
+            if binary_image[i, j] == 1:
+                neighbors = get_neighbors(labeled_image, i, j)
+                if not neighbors:
+                    labeled_image[i, j] = current_label
+                    current_label += 1
+                else:
+                    min_label = min(neighbors)
+                    labeled_image[i, j] = min_label
+                    propagate_equivalences(labeled_image, neighbors, min_label)
+
+    num_labels = np.max(labeled_image)
+    return labeled_image, num_labels
+
+def get_neighbors(labeled_image, i, j):
+    neighbors = []
+    if i > 0 and labeled_image[i - 1, j] != 0:
+        neighbors.append(labeled_image[i - 1, j])
+    if j > 0 and labeled_image[i, j - 1] != 0:
+        neighbors.append(labeled_image[i, j - 1])
+    return neighbors
+
+def propagate_equivalences(labeled_image, neighbors, min_label):
+    for label in neighbors:
+        if label != min_label:
+            labeled_image[labeled_image == label] = min_label
+
+
+
+
+def opening_closing(img, operation_iteration, opening):
+    if opening:
+        for i in range(operation_iteration):
+            img = erosion_dilation(img = img, erosion=True, method= "structuring element",neighbor_size=5)
+        for j in range(operation_iteration):
+            img = erosion_dilation(img = img, erosion=False, method= "structuring element",neighbor_size=5)
+        return img
+    else: 
+        for i in range(operation_iteration):
+            img = erosion_dilation(img = img, erosion=False, method= "structuring element",neighbor_size=5)
+        for j in range(operation_iteration):
+            img = erosion_dilation(img = img, erosion=True, method= "structuring element",neighbor_size=5)
+        return img
 def main_page():
     st.title("Image Edit GUI")
     st.header("Welcome to Image Edit GUI")
@@ -148,10 +233,16 @@ def main_page():
                "Substracting 2 Images",
                "Sharpening or Blurring",
                "Detect Edges",
-               "Apply Median Filtering"]
+               "Apply Median Filtering",
+               "Erosion and Dilation", 
+               "Opening and Closing"]
     selected_option = st.selectbox("Select an option", options)
     st.write('You Selected: ', selected_option)
     return selected_option
+
+
+
+
 
 def show_img_page():
     file_upload = st.file_uploader("Upload your image here")
@@ -256,6 +347,80 @@ def med_filter_page():
             new_img = med_filter(img_gray)
             st.image(new_img, caption = 'This is the Image after Applying Median Filter')
 
+def erosion_dilation_page():
+    file_upload = st.file_uploader("Upload your image here...")
+
+    if file_upload is not None:
+        # Load the image
+        image = convert_type(file_upload)
+        # Erosion and Dilation tabs
+        tab1, tab2 = st.tabs(['Erosion', 'Dilation'])
+
+        with tab1:
+            method = st.radio("Which method you want to use in the erosion?", ["Minimum Filter", "Structuring Element"])
+            img_gray = convert_to_gray(image)
+            neighbor_size = 5
+            t1col = st.columns(2)
+            with t1col[0]:
+                st.image(image, caption="This is the original image")
+            with t1col[1]:
+                if method == "Minimum Filter":
+                    new_img = erosion_dilation(img=img_gray, erosion=True, method="min_filter", neighbor_size=neighbor_size)
+                    st.image(new_img, caption='This is the Image after Applying Erosion using Minimum Filter')
+
+                if method == "Structuring Element":
+                    new_img = erosion_dilation(img=img_gray, erosion=True, method="structuring element", neighbor_size=neighbor_size)
+                    st.image(new_img, caption='This is the Image after Applying Erosion using Structuring Element')
+
+        with tab2:
+            method = st.radio("Which method you want to use in the dilation?", ["Maximum Filter", "Structuring Element"])
+            t2col = st.columns(2)
+            with t2col[0]:
+                st.image(image, caption="This is the original image")
+            with t2col[1]:
+                if method == "Maximum Filter":
+                    new_img = erosion_dilation(img=img_gray, erosion=False, method="max_filter", neighbor_size=neighbor_size)
+                    st.image(new_img, caption='This is the Image after Applying Dilation using Maximum Filter')
+
+                if method == "Structuring Element":
+                    new_img = erosion_dilation(img=img_gray, erosion=False, method="structuring element", neighbor_size=neighbor_size)
+                    st.image(new_img, caption='This is the Image after Applying Dilation using Structuring Element')
+
+def opening_closing_page():
+    file_upload = st.file_uploader("Upload your image here...")
+
+    if file_upload is not None:
+        image = convert_type(file_upload)
+        num_operation = st.slider('Selected Number of Itreation', min_value=1, max_value=12)
+        tab1, tab2 = st.tabs(['Opening', 'Closing'])
+
+
+        with tab1:
+            img_gray = convert_to_gray(image)
+            t1col = st.columns(2)
+            with t1col[0]:
+                st.image(image, caption="This is the original image")
+            with t1col[1]:
+                new_img = opening_closing(img = image, opening=True, operation_iteration=num_operation)
+                st.image(new_img, caption=f'This is the Image after opening for {num_operation} iterations')
+            object_count, _ = count_objects(new_img)
+            st.markdown(f"<h1 style='text-align: center; font-size: 30px; \
+                        '>In this image there are {object_count} objects</h1>", 
+                        unsafe_allow_html=True)
+                
+        with tab2:
+            t2col = st.columns(2)
+            with t2col[0]:
+                st.image(image, caption="This is the original image")
+            with t2col[1]:
+                new_img = opening_closing(img = image, opening=False, operation_iteration=num_operation)
+                st.image(new_img, caption=f'This is the Image after closing for {num_operation} iterations')
+            object_count, _ = count_objects(new_img)
+            st.markdown(f"<h1 style='text-align: center; font-size: 30px; \
+                        '>In this image there are {object_count} objects</h1>", 
+                        unsafe_allow_html=True)
+
+
 def main(): 
     option = main_page()
     if option == "Show Image":
@@ -274,6 +439,10 @@ def main():
         edge_detect_page()
     elif option == "Apply Median Filtering":
         med_filter_page()
+    elif option == "Erosion and Dilation":
+        erosion_dilation_page()
+    elif option =="Opening and Closing":
+        opening_closing_page()
 
     
 if __name__ == "__main__":
