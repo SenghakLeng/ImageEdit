@@ -3,3 +3,4 @@ streamlit
 Pillow
 scipy
 opencv-python
+mesa
