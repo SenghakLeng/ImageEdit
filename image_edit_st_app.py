@@ -168,7 +168,7 @@ def count_objects(img):
     
     labeled_image, num_labels = label_objects(thres_img)
 
-    object_count = num_labels - 1
+    object_count = num_labels 
 
     return object_count, labeled_image
 
